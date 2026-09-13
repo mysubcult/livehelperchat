@@ -602,6 +602,7 @@ class erLhcoreClassMailconvValidator {
         $phpmailer->Host = $mailbox->host;
         $phpmailer->Port = $mailbox->port;
 
+        // To work with various SMTP servers
         $phpmailer->SMTPOptions = array(
             'ssl' => array(
                 'verify_peer' => false,
