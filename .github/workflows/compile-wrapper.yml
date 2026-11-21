@@ -1,0 +1,89 @@
+name: Compile widget wrapper
+on: [push]
+permissions:
+  contents: read
+jobs:
+  wrapper:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: d1e52fd6e5cdceed2180ba6e6df1d1188ab6021b
+          fetch-depth: 2
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Rebuild reference and candidate
+        shell: bash
+        run: |
+          set -euo pipefail
+          base=b84f394365f9660222d486bf7d965635bea0e1ae
+          source=d1e52fd6e5cdceed2180ba6e6df1d1188ab6021b
+          wrapper=lhc_web/design/defaulttheme/widget/wrapper
+          served=lhc_web/design/defaulttheme/js/widgetv2
+          pathspec=("$wrapper/dist" "$served")
+          tmp="$RUNNER_TEMP/wrapper"
+          mkdir -p "$tmp"/{reference,output}
+          git checkout -q --detach "$base"
+          (
+            cd "$wrapper"
+            npm ci --no-audit --no-fund
+            npm run build
+            npm run release
+          )
+          git add -N -- "${pathspec[@]}"
+          git diff --name-status HEAD -- "${pathspec[@]}" | tee "$tmp/output/reference-drift.txt"
+          for d in "${pathspec[@]}"; do
+            mkdir -p "$tmp/reference/$d"
+            cp -a "$d/." "$tmp/reference/$d/"
+          done
+          git reset -q --hard "$base"
+          git clean -fd -- "${pathspec[@]}"
+          git checkout -q --detach "$source"
+          git diff --exit-code "$base" HEAD -- "$wrapper/package.json" "$wrapper/package-lock.json"
+          (
+            cd "$wrapper"
+            npm run build
+            npm run release
+          )
+          git add -N -- "${pathspec[@]}"
+          git diff --name-status HEAD -- "${pathspec[@]}" | tee "$tmp/output/candidate-changes.txt"
+          python3 - "$tmp" "$wrapper/dist" "$served" <<'PY'
+          from pathlib import Path
+          import subprocess, sys
+          tmp = Path(sys.argv[1])
+          roots = sys.argv[2:]
+          candidates = subprocess.check_output(['git','diff','--name-only','HEAD','--',*roots],text=True).splitlines()
+          paths = []
+          for name in candidates:
+              p=Path(name)
+              previous=tmp/'reference'/p
+              if previous.exists() and p.exists() and p.read_bytes()==previous.read_bytes():
+                  continue
+              paths.append(name)
+          if not paths:
+              raise RuntimeError('No source-dependent output')
+          print('Source-dependent output:',*paths,sep='\n')
+          (tmp/'output'/'selected.txt').write_text('\n'.join(paths)+'\n')
+          (tmp/'output'/'wrapper.patch').write_bytes(subprocess.check_output(['git','diff','--binary','--full-index','HEAD','--',*paths]))
+          # The published entry must be loadable from HEAD plus the candidate patch.
+          import re
+          served = Path(roots[1])
+          for name in re.findall(r'\b[0-9a-f]{20}\b', (served/'index.js').read_text()):
+              p=served/(name+'.js')
+              if p.is_file() and str(p) not in paths:
+                  subprocess.run(['git','cat-file','-e','HEAD:'+str(p)],check=True)
+          assert (Path(roots[0])/'index.js').read_bytes()==(served/'index.js').read_bytes()
+          PY
+          git checkout --quiet --force HEAD -- "${pathspec[@]}"
+          git clean -fd -- "${pathspec[@]}"
+          git apply --check "$tmp/output/wrapper.patch"
+          git apply "$tmp/output/wrapper.patch"
+          (cd "$tmp/output" && sha256sum wrapper.patch > SHA256SUMS)
+      - uses: actions/upload-artifact@v4
+        with:
+          name: wrapper-release
+          path: ${{ runner.temp }}/wrapper/output/
+          retention-days: 2
