@@ -9,8 +9,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: d5d166b9d
-          fetch-depth: 2
+          ref: d5d166b9d98651e6c55597f0920f3f7105c6682b
+          fetch-depth: 12
           persist-credentials: false
       - uses: actions/setup-node@v4
         with:
@@ -20,7 +20,7 @@ jobs:
         run: |
           set -euo pipefail
           base=b84f394365f9660222d486bf7d965635bea0e1ae
-          source=d5d166b9d
+          source=d5d166b9d98651e6c55597f0920f3f7105c6682b
           wrapper=lhc_web/design/defaulttheme/widget/wrapper
           served=lhc_web/design/defaulttheme/js/widgetv2
           pathspec=("$wrapper/dist" "$served")
